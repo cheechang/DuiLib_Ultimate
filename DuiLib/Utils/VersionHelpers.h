@@ -1,7 +1,7 @@
 #ifndef _VERSIONHELPERS_H_INCLUDED_
 #define _VERSIONHELPERS_H_INCLUDED_
 #include <specstrings.h>
-#include <wchar.h>	// wcsstr：解析 szCSDVersion 中的 Service Pack 版本
+#include <wchar.h>
 
 namespace DuiLib 
 {
@@ -27,10 +27,6 @@ namespace DuiLib
 /*
  * Touch Input defines and functions
  */
-
-/*
- * Touch input handle
- */
 DECLARE_HANDLE(HTOUCHINPUT);
 
 typedef struct tagTOUCHINPUT {
@@ -47,15 +43,8 @@ typedef struct tagTOUCHINPUT {
 } TOUCHINPUT, *PTOUCHINPUT;
 typedef TOUCHINPUT const * PCTOUCHINPUT;
 
-
-/*
- * Conversion of touch input coordinates to pixels
- */
 #define TOUCH_COORD_TO_PIXEL(l)         ((l) / 100)
 
-/*
- * Touch input flag values (TOUCHINPUT.dwFlags)
- */
 #define TOUCHEVENTF_MOVE            0x0001
 #define TOUCHEVENTF_DOWN            0x0002
 #define TOUCHEVENTF_UP              0x0004
@@ -65,67 +54,93 @@ typedef TOUCHINPUT const * PCTOUCHINPUT;
 #define TOUCHEVENTF_PEN             0x0040
 #define TOUCHEVENTF_PALM            0x0080
 
-/*
- * Touch input mask values (TOUCHINPUT.dwMask)
- */
-#define TOUCHINPUTMASKF_TIMEFROMSYSTEM  0x0001  // the dwTime field contains a system generated value
-#define TOUCHINPUTMASKF_EXTRAINFO       0x0002  // the dwExtraInfo field is valid
-#define TOUCHINPUTMASKF_CONTACTAREA     0x0004  // the cxContact and cyContact fields are valid
-/*
- * RegisterTouchWindow flag values
- */
+#define TOUCHINPUTMASKF_TIMEFROMSYSTEM  0x0001
+#define TOUCHINPUTMASKF_EXTRAINFO       0x0002
+#define TOUCHINPUTMASKF_CONTACTAREA     0x0004
+
 #define TWF_FINETOUCH       (0x00000001)
 #define TWF_WANTPALM        (0x00000002)
-
 #endif
 
-	// ==================== 真实版本获取（RtlGetVersion） ====================
-	// 说明：VerifyVersionInfo/GetVersionEx 在应用缺少兼容性清单（manifest）时，
-	//       会被系统限制报告为 Win8.1(6.3) 及以下，导致 Win10/Win11 检测不到；
-	//       RtlGetVersion（ntdll.dll）始终返回真实版本，不受清单影响。
-	//       Win11 版本号为 10.0.22000+（与 Win10 同为 major=10/minor=0，仅 build 号不同）。
+	// ==================== 统一系统版本底层封装（消除重复ntdll加载逻辑） ====================
+	// RtlGetVersion 不受应用manifest兼容虚拟化限制，返回真实系统版本
 	typedef struct _DUILIB_RTL_OSVERSIONINFOW {
-	 ULONG dwOSVersionInfoSize;
-	 ULONG dwMajorVersion;
-	 ULONG dwMinorVersion;
-	 ULONG dwBuildNumber;
-	 ULONG dwPlatformId;
-	 WCHAR szCSDVersion[128];
+		ULONG dwOSVersionInfoSize;
+		ULONG dwMajorVersion;
+		ULONG dwMinorVersion;
+		ULONG dwBuildNumber;
+		ULONG dwPlatformId;
+		WCHAR szCSDVersion[128];
 	} DUILIB_RTL_OSVERSIONINFOW, *PDUILIB_RTL_OSVERSIONINFOW;
 
 	typedef LONG(NTAPI *PFN_DUILIB_RtlGetVersion)(PDUILIB_RTL_OSVERSIONINFOW);
 
+	/// <summary>
+	/// 获取真实系统版本信息（全局唯一入口，所有判断函数复用）
+	/// </summary>
 	static BOOL GetRealOSVersion(PDUILIB_RTL_OSVERSIONINFOW pVersion)
 	{
-	 if (pVersion == NULL) return FALSE;
-	 HMODULE hNtdll = ::GetModuleHandleW(L"ntdll.dll");
-	 if (hNtdll == NULL) return FALSE;
-	 PFN_DUILIB_RtlGetVersion pfnRtlGetVersion = (PFN_DUILIB_RtlGetVersion)::GetProcAddress(hNtdll, "RtlGetVersion");
-	 if (pfnRtlGetVersion == NULL) return FALSE;
-	 pVersion->dwOSVersionInfoSize = sizeof(DUILIB_RTL_OSVERSIONINFOW);
-	 return pfnRtlGetVersion(pVersion) == 0;
+		if (pVersion == NULL)
+			return FALSE;
+
+		HMODULE hNtdll = ::GetModuleHandleW(L"ntdll.dll");
+		if (hNtdll == NULL)
+			return FALSE;
+
+		PFN_DUILIB_RtlGetVersion pfnRtlGetVersion = (PFN_DUILIB_RtlGetVersion)::GetProcAddress(hNtdll, "RtlGetVersion");
+		if (pfnRtlGetVersion == NULL)
+			return FALSE;
+
+		ZeroMemory(pVersion, sizeof(DUILIB_RTL_OSVERSIONINFOW));
+		pVersion->dwOSVersionInfoSize = sizeof(DUILIB_RTL_OSVERSIONINFOW);
+		return pfnRtlGetVersion(pVersion) == 0;
 	}
 
+	/// <summary>
+	/// 从 szCSDVersion 字符串提取 Service Pack 数字，提取逻辑统一复用
+	/// </summary>
+	static WORD ExtractServicePack(const WCHAR* szCSDVersion)
+	{
+		if (szCSDVersion == nullptr)
+			return 0;
+
+		const WCHAR* pszSP = wcsstr(szCSDVersion, L"Service Pack");
+		if (pszSP == nullptr)
+			return 0;
+
+		for (const WCHAR* p = pszSP; *p != L'\0'; ++p)
+		{
+			if (*p >= L'0' && *p <= L'9')
+			{
+				return (WORD)(*p - L'0');
+			}
+		}
+		return 0;
+	}
+
+	/// <summary>
+	/// 通用版本比对：判断当前系统 >= 指定 Major.Minor.SP
+	/// 统一封装版本+SP比较逻辑，所有系统判断函数全部复用此方法
+	/// </summary>
 	static BOOL IsWindowsVersionOrGreater(WORD wMajorVersion, WORD wMinorVersion, WORD wServicePackMajor)
 	{
-	 DUILIB_RTL_OSVERSIONINFOW osvi;
-	 ZeroMemory(&osvi, sizeof(osvi));
-	 if (!GetRealOSVersion(&osvi)) return FALSE;
+		DUILIB_RTL_OSVERSIONINFOW osvi;
+		if (!GetRealOSVersion(&osvi))
+			return FALSE;
 
-	 // RtlGetVersion 不提供 wServicePackMajor 字段，从 szCSDVersion 文本解析（如 "Service Pack 1"）
-	 WORD wServicePack = 0;
-	 const WCHAR* pszSP = wcsstr(osvi.szCSDVersion, L"Service Pack");
-	 if (pszSP != NULL) {
-	  for (const WCHAR* p = pszSP; *p != 0; ++p) {
-	   if (*p >= L'0' && *p <= L'9') { wServicePack = (WORD)(*p - L'0'); break; }
-	  }
-	 }
-	 // 语义与原 VerifyVersionInfo(VER_GREATER_EQUAL) 一致：major -> minor -> SP 字典序比较
-	 if (osvi.dwMajorVersion != wMajorVersion) return osvi.dwMajorVersion > wMajorVersion;
-	 if (osvi.dwMinorVersion != wMinorVersion) return osvi.dwMinorVersion > wMinorVersion;
-	 return wServicePack >= wServicePackMajor;
+		WORD wCurrentSP = ExtractServicePack(osvi.szCSDVersion);
+
+		// 主版本优先比较
+		if (osvi.dwMajorVersion != wMajorVersion)
+			return osvi.dwMajorVersion > wMajorVersion;
+		// 次版本次之
+		if (osvi.dwMinorVersion != wMinorVersion)
+			return osvi.dwMinorVersion > wMinorVersion;
+		// 最后比对Service Pack
+		return wCurrentSP >= wServicePackMajor;
 	}
 
+	// ==================== 对外系统判断API（全部复用通用IsWindowsVersionOrGreater，无重复底层代码） ====================
 	static BOOL IsWindowsXPOrGreater()
 	{
 		return IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINXP), LOBYTE(_WIN32_WINNT_WINXP), 0);
@@ -186,40 +201,19 @@ typedef TOUCHINPUT const * PCTOUCHINPUT;
 		return IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINTHRESHOLD), LOBYTE(_WIN32_WINNT_WINTHRESHOLD), 0);
 	}
 
-	// 底层RtlGetVersion 不受manifest虚拟化影响，兜底方案
-	typedef NTSTATUS(WINAPI* PRtlGetVersion)(PRTL_OSVERSIONINFOW);
-	static inline bool IsWindows10ViaRtl()
-	{
-		HMODULE hNtdll = GetModuleHandleW(L"ntdll.dll");
-		if (!hNtdll) return false;
-
-		PRtlGetVersion fnRtlGetVersion = (PRtlGetVersion)GetProcAddress(hNtdll, "RtlGetVersion");
-		if (!fnRtlGetVersion) return false;
-
-		RTL_OSVERSIONINFOW verInfo = { sizeof(verInfo) };
-		if (fnRtlGetVersion(&verInfo) != 0)
-			return false;
-
-		return verInfo.dwMajorVersion == 10 && verInfo.dwMinorVersion == 0;
-	}
-
 	static BOOL IsWindows10OrGreater()
 	{
-		if (IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINTHRESHOLD), LOBYTE(_WIN32_WINNT_WINTHRESHOLD), 0))
-		{
-			return TRUE;
-		}
-		return IsWindows10ViaRtl();
+		return IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINTHRESHOLD), LOBYTE(_WIN32_WINNT_WINTHRESHOLD), 0);
 	}
 
-	// Windows 11 及以上（Win11 首个版本 21H2 的 build 为 22000；Win10 最高 build 19045）
+	// Windows11判定：主版本10且Build>=22000，或主版本>10
 	static BOOL IsWindows11OrGreater()
 	{
-	 DUILIB_RTL_OSVERSIONINFOW osvi;
-	 ZeroMemory(&osvi, sizeof(osvi));
-	 if (!GetRealOSVersion(&osvi)) return FALSE;
-	 return (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000)
-	  || osvi.dwMajorVersion > 10;
+		DUILIB_RTL_OSVERSIONINFOW osvi;
+		if (!GetRealOSVersion(&osvi))
+			return FALSE;
+
+		return (osvi.dwMajorVersion == 10 && osvi.dwBuildNumber >= 22000) || osvi.dwMajorVersion > 10;
 	}
 
 	static BOOL IsWindowsServer()
