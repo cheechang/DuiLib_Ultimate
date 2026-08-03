@@ -556,4 +556,9 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- 部署 WebView2 Loader（Win10+ 且已安装 WebView2 Runtime 时，WebBrowser 控件自动使用 WebView2） -->
+  <Target Name="CopyWebView2Loader" AfterTargets="Build">
+    <Copy SourceFiles="$(ProjectDir)..\..\3rd\WebView2\lib\x64\WebView2Loader.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'$(Platform)'=='x64'" />
+    <Copy SourceFiles="$(ProjectDir)..\..\3rd\WebView2\lib\x86\WebView2Loader.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'$(Platform)'=='Win32'" />
+  </Target>
 </Project>

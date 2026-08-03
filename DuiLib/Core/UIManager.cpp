@@ -230,7 +230,7 @@ namespace DuiLib {
 	HINSTANCE CPaintManagerUI::m_hResourceInstance = NULL;
 	CDuiString CPaintManagerUI::m_pStrResourcePath;
 	CDuiString CPaintManagerUI::m_pStrResourceZip;
-	CDuiString CPaintManagerUI::m_pStrResourceZipPwd;  //Garfield 20160325 带密码zip包解密
+	CDuiString CPaintManagerUI::m_pStrResourceZipPwd;
 	HANDLE CPaintManagerUI::m_hResourceZip = NULL;
 	bool CPaintManagerUI::m_bCachedResourceZip = true;
 	BYTE* CPaintManagerUI::m_cbZipBuf = nullptr;
@@ -244,6 +244,28 @@ namespace DuiLib {
 	CStdPtrArray CPaintManagerUI::m_aPreMessages;
 	CStdPtrArray CPaintManagerUI::m_aPlugins;
 
+	////////////////////////////////////////////////////////////////////////////////////////////
+	// 触摸API函数指针（动态加载，避免XP链接错误）
+	typedef BOOL (WINAPI *PFN_REGISTERTOUCHWINDOW)(HWND, ULONG);
+	typedef BOOL (WINAPI *PFN_GETTOUCHINPUTINFO)(HTOUCHINPUT, UINT, PTOUCHINPUT, int);
+	typedef BOOL (WINAPI *PFN_CLOSETouchINPUTHANDLE)(HTOUCHINPUT);
+
+	static PFN_REGISTERTOUCHWINDOW pRegisterTouchWindow = NULL;
+	static PFN_GETTOUCHINPUTINFO pGetTouchInputInfo = NULL;
+	static PFN_CLOSETouchINPUTHANDLE pCloseTouchInputHandle = NULL;
+
+	// 初始化触摸API（仅Vista+加载）
+	static void InitTouchAPI() {
+		if (!IsWindowsVistaOrGreater()) return;
+		HMODULE hUser32 = GetModuleHandle(_T("user32.dll"));
+		if (!hUser32) return;
+		pRegisterTouchWindow = (PFN_REGISTERTOUCHWINDOW)GetProcAddress(hUser32, "RegisterTouchWindow");
+		pGetTouchInputInfo = (PFN_GETTOUCHINPUTINFO)GetProcAddress(hUser32, "GetTouchInputInfo");
+		pCloseTouchInputHandle = (PFN_CLOSETouchINPUTHANDLE)GetProcAddress(hUser32, "CloseTouchInputHandle");
+	}
+
+
+	////////////////////////////////////////////////////////////////////////////////////////////
 	CPaintManagerUI::CPaintManagerUI() :
 	m_hWndPaint(NULL),
 		m_hDcPaint(NULL),
@@ -282,6 +304,9 @@ namespace DuiLib {
 		m_pDPI(NULL),
 		m_iHoverTime(400UL)
 	{
+		// 初始化触摸坐标
+		m_ptLastTouch.x = m_ptLastTouch.y = 0;
+
 		if (m_SharedResInfo.m_DefaultFontInfo.sFontName.IsEmpty())
 		{
 			m_SharedResInfo.m_dwDefaultDisabledColor = 0xFFA7A6AA;
@@ -407,6 +432,17 @@ namespace DuiLib {
 			m_hWndPaint = hWnd;
 			m_hDcPaint = ::GetDC(hWnd);
 			m_aPreMessages.Add(this);
+
+			m_ptLastTouch.x = m_ptLastTouch.y = 0;
+			m_bTouchSupported = false;
+			if (IsWindowsVistaOrGreater()) {
+				InitTouchAPI(); // 动态加载触摸API
+				if (pRegisterTouchWindow) {
+					// 注册触摸窗口（TWF_FINETOUCH：高精度触摸）
+					pRegisterTouchWindow(hWnd, TWF_FINETOUCH);
+					m_bTouchSupported = true;
+				}
+			}
 		}
 	}
 
@@ -1789,6 +1825,73 @@ namespace DuiLib {
 				m_pEventRClick = NULL;
 			}
 			break;
+		case WM_TOUCH:
+			{
+				if(!m_bTouchSupported) {
+					return 0;
+				}
+
+				UINT nTouchCount = LOWORD(wParam); // 触摸点数量
+				PTOUCHINPUT pTouchInputs = new TOUCHINPUT[nTouchCount];
+				if (!pTouchInputs) {
+					if (pCloseTouchInputHandle) pCloseTouchInputHandle((HTOUCHINPUT)lParam);
+					return 0;
+				}
+
+				LRESULT lResult = 0;
+				// 动态调用GetTouchInputInfo（避免XP下未定义）
+				if (pGetTouchInputInfo((HTOUCHINPUT)lParam, nTouchCount, pTouchInputs, sizeof(TOUCHINPUT)))
+				{
+					for (UINT i = 0; i < nTouchCount; ++i)
+					{
+						const TOUCHINPUT& ti = pTouchInputs[i];
+
+						// 仅处理"触摸移动"事件（忽略按下/抬起/取消）
+						if (!(ti.dwFlags & TOUCHEVENTF_MOVE))
+							continue;
+
+						// 1. 转换触摸坐标：触摸坐标单位是「百分之一像素」，需转为普通像素
+						POINT ptTouch = {
+							GET_X_LPARAM(ti.x) / 100,
+							GET_Y_LPARAM(ti.y) / 100
+						};
+						// 2. 屏幕坐标转客户区坐标（与鼠标消息坐标统一）
+						ScreenToClient(m_hWndPaint, &ptTouch);
+
+						// 3. 首次触摸：记录坐标后跳过
+						if (m_ptLastTouch.x == 0 && m_ptLastTouch.y == 0)
+						{
+							m_ptLastTouch = ptTouch;
+							continue;
+						}
+
+						// 4. 计算垂直移动增量（过滤<8像素的微小移动，避免误触发）
+						int nDeltaY = m_ptLastTouch.y - ptTouch.y;
+						if (abs(nDeltaY) < 8)
+							continue;
+
+						// 5. 转换为滚轮增量（WHEEL_DELTA=120是系统默认滚轮步长）
+						int nWheelDelta = (nDeltaY > 0) ? WHEEL_DELTA : -WHEEL_DELTA;
+
+						// 6. 构造WM_MOUSEWHEEL消息参数
+						WPARAM wWheelParam = MAKEWPARAM(0, nWheelDelta); // 高16位=滚轮增量，低16位=按键状态
+						LPARAM lWheelParam = MAKELPARAM(ptTouch.x, ptTouch.y); // 客户区坐标
+
+						// 7. 发送滚轮消息到绘制窗口
+						::SendMessage(m_hWndPaint, WM_MOUSEWHEEL, wWheelParam, lWheelParam);
+
+						// 8. 更新最后触摸坐标
+						m_ptLastTouch = ptTouch;
+					}
+
+					// 释放触摸输入句柄（关键：否则会内存泄漏）
+					pCloseTouchInputHandle((HTOUCHINPUT)lParam);
+				}
+
+				// 释放触摸数据缓冲区
+				delete[] pTouchInputs;
+				break;
+			}
 		case WM_MOUSEWHEEL:
 			{
 				if( m_pRoot == NULL ) break;
@@ -1973,6 +2076,7 @@ namespace DuiLib {
 	bool CPaintManagerUI::AttachDialog(CControlUI* pControl)
 	{
 		ASSERT(::IsWindow(m_hWndPaint));
+		
 		// 创建阴影窗口
 		m_shadow.Create(this);
 

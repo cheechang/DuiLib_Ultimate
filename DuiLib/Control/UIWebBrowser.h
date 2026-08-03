@@ -1,4 +1,4 @@
-#ifndef __UIWEBBROWSER_H__
+﻿#ifndef __UIWEBBROWSER_H__
 #define __UIWEBBROWSER_H__
 
 #pragma once
@@ -6,6 +6,40 @@
 #include <MsHTML.h>
 #include "Utils/WebBrowserEventHandler.h"
 #include <ExDisp.h>
+
+// ============================================================================
+// WebView2 集成（Win10 及以上系统优先使用，低版本系统自动回退 WebBrowser/IE）
+// ----------------------------------------------------------------------------
+// 编译开关 DUILIB_USE_WEBVIEW2 自动判定：
+//   - 编译器为 VS2015 及以上（_MSC_VER >= 1900，WebView2 头文件最低要求）
+//   - 能找到 WebView2 SDK 头文件（仓库已将 SDK 头文件复制到 DuiLib/ 目录，
+//     该目录位于默认 include 路径中，无需额外配置；外部工程也可自行提供更新版本）
+// 运行时判定（CWebBrowserUI::IsWebView2Supported）：
+//   - 系统为 Win10 及以上（Utils/VersionHelpers.h）
+//   - 已安装 WebView2 Runtime（通过动态加载 WebView2Loader.dll 检测）
+//   - 窗口非分层（WebView2 子窗口不支持在分层窗口上渲染）
+// 不满足时 CWebBrowserUI 走原有 ActiveX WebBrowser（IE）路径，老系统完全兼容。
+// ============================================================================
+#if !defined(DUILIB_USE_WEBVIEW2)
+#  if defined(_MSC_VER) && (_MSC_VER >= 1900)
+#    if defined(__has_include)
+#      if __has_include("../WebView2.h") && __has_include("../WebView2EnvironmentOptions.h")
+#        define DUILIB_USE_WEBVIEW2 1
+#      endif
+#    endif
+#  endif
+#endif
+
+#if defined(DUILIB_USE_WEBVIEW2)
+// WebView2 SDK 头文件在现代 Windows SDK 下要求 NTDDI_VERSION >= Vista（wrl/def.h 检查），
+// 老工程 StdAfx.h 只定义了 _WIN32_WINNT，这里补充定义（WebView2 本身要求 Win10+）
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000000	// NTDDI_WIN10
+#endif
+#include "WebView2.h"
+#include "WebView2EnvironmentOptions.h"
+#include "Utils/WebView2Helper.h"
+#endif
 
 namespace DuiLib
 {
@@ -20,7 +54,7 @@ namespace DuiLib
 	{
 		DECLARE_DUICONTROL(CWebBrowserUI)
 	public:
-		/// ���캯��
+		/// 构造函数
 		CWebBrowserUI();
 		virtual ~CWebBrowserUI();
 
@@ -46,17 +80,56 @@ namespace DuiLib
 		static HRESULT GetProperty(IDispatch *pObj, LPOLESTR pName, VARIANT *pValue);
 		static HRESULT SetProperty(IDispatch *pObj, LPOLESTR pName, VARIANT *pValue);
 
+		// ==================== WebView2 集成接口 ====================
+#if defined(DUILIB_USE_WEBVIEW2)
+		// 当前是否运行在 WebView2 模式（Win10+ 且 WebView2 Runtime 可用）
+		bool IsWebView2Mode() const;
+		// 强制开关 WebView2（默认自动判断）：SetWebView2Enabled(false) 强制使用老 WebBrowser
+		void SetWebView2Enabled(bool bEnable);
+		// 停止加载
+		void Stop();
+		// 向网页发送消息（网页端通过 window.chrome.webview.addEventListener("message", ...) 接收）
+		void PostWebMessage(LPCTSTR lpszMessage);
+		// 当前系统是否支持 WebView2（Win10+ 且 Runtime 已装 且窗口非分层）
+		bool IsWebView2Supported();
+		// 获取底层 ICoreWebView2 指针（仅 WebView2 模式有效，否则返回 NULL）
+		ICoreWebView2* GetWebView2() const;
+		// WebView2 异步创建回调消息（供内部事件 sink 使用）
+		enum { WEBVIEW2_MSG_FAILED = 1, WEBVIEW2_MSG_CREATE_CONTROLLER = 2, WEBVIEW2_MSG_BIND = 3 };
+		static UINT GetWebView2NotifyMessage();
+		// 布局/可见性/消息分发（WebView2 子窗口与 ActiveX 宿主窗口不同，需要单独处理）
+		virtual void SetPos(RECT rc, bool bNeedInvalidate = true);
+		virtual void Move(SIZE szOffset, bool bNeedInvalidate = true);
+		virtual void SetVisible(bool bVisible = true);
+		virtual void SetInternVisible(bool bVisible = true);
+		virtual LRESULT MessageHandler(UINT uMsg, WPARAM wParam, LPARAM lParam, bool& bHandled);
+		// ==================== WebView2 模式内部实现 ====================
+		// 以下方法供 WebView2 事件 sink（定义于 UIWebBrowser.cpp）回调，故置于 public
+		bool InitWebView2();			// 创建 WebView2 环境（异步，创建完成后切回 UI 线程）
+		void ReleaseWebView2();			// 释放 WebView2 资源
+		void UpdateWebView2Bounds();	// 同步 WebView2 子窗口位置
+		void OnWebView2Notify(WPARAM wParam, LPARAM lParam);	// 处理异步回调消息
+		void OnWebView2Bind();			// 环境+控制器就绪后：注册事件、设置边界、导航
+		// WebView2 事件 -> CWebBrowserEventHandler 翻译
+		void OnWebView2NavigationStarting(ICoreWebView2* pWebView, ICoreWebView2NavigationStartingEventArgs* pArgs);
+		void OnWebView2NavigationCompleted(ICoreWebView2* pWebView, ICoreWebView2NavigationCompletedEventArgs* pArgs);
+		void OnWebView2DocumentTitleChanged(ICoreWebView2* pWebView);
+		void OnWebView2NewWindowRequested(ICoreWebView2* pWebView, ICoreWebView2NewWindowRequestedEventArgs* pArgs);
+		void OnWebView2HistoryChanged(ICoreWebView2* pWebView);
+		void OnWebView2WebMessageReceived(ICoreWebView2* pWebView, ICoreWebView2WebMessageReceivedEventArgs* pArgs);
+#endif
+
 	protected:
-		IWebBrowser2*			m_pWebBrowser2; //�����ָ��
+		IWebBrowser2*			m_pWebBrowser2; //浏览器指针
 		IHTMLWindow2*		_pHtmlWnd2;
 		LONG m_dwRef;
 		DWORD m_dwCookie;
 		virtual void ReleaseControl();
 		HRESULT RegisterEventHandler(BOOL inAdvise);
 		virtual void SetAttribute(LPCTSTR pstrName, LPCTSTR pstrValue);
-		CDuiString m_sHomePage;	// Ĭ��ҳ��
-		bool m_bAutoNavi;	// �Ƿ�����ʱ��Ĭ��ҳ��
-		CWebBrowserEventHandler* m_pWebBrowserEventHandler;	//������¼�����
+		CDuiString m_sHomePage;	// 默认页面
+		bool m_bAutoNavi;	// 是否启动时打开默认页面
+		CWebBrowserEventHandler* m_pWebBrowserEventHandler;	//浏览器事件处理
 
 		// DWebBrowserEvents2
 		void BeforeNavigate2( IDispatch *pDisp,VARIANT *&url,VARIANT *&Flags,VARIANT *&TargetFrameName,VARIANT *&PostData,VARIANT *&Headers,VARIANT_BOOL *&Cancel );
@@ -67,6 +140,9 @@ namespace DuiLib
 		void CommandStateChange(long Command,VARIANT_BOOL Enable);
 		void TitleChange(BSTR bstrTitle);
 		void DocumentComplete(IDispatch *pDisp,VARIANT *&url);
+
+		// 老系统路径：创建 ActiveX WebBrowser（原逻辑）；两种模式都需声明
+		bool DoCreateActiveXBrowser();
 
 	public:
 		virtual LPCTSTR GetClass() const;
@@ -93,7 +169,7 @@ namespace DuiLib
 		STDMETHOD(OnDocWindowActivate)(BOOL fActivate);
 		STDMETHOD(OnFrameWindowActivate)(BOOL fActivate);
 		STDMETHOD(ResizeBorder)(LPCRECT prcBorder, IOleInPlaceUIWindow* pUIWindow, BOOL fFrameWindow);
-		STDMETHOD(TranslateAccelerator)(LPMSG lpMsg, const GUID* pguidCmdGroup, DWORD nCmdID);	//�������Ϣ����
+		STDMETHOD(TranslateAccelerator)(LPMSG lpMsg, const GUID* pguidCmdGroup, DWORD nCmdID);	//浏览器消息过滤
 		STDMETHOD(GetOptionKeyPath)(LPOLESTR* pchKey, DWORD dwReserved);
 		STDMETHOD(GetDropTarget)(IDropTarget* pDropTarget, IDropTarget** ppDropTarget);
 		STDMETHOD(GetExternal)(IDispatch** ppDispatch);
@@ -167,8 +243,19 @@ namespace DuiLib
             /* [out] */ __RPC__deref_out_opt IEnumString **ppenumString,
             /* [in] */ DWORD dwFlags) {return S_OK;}
 		// ITranslateAccelerator
-		// Duilib��Ϣ�ַ���WebBrowser
+		// Duilib消息分发给WebBrowser
 		virtual LRESULT TranslateAccelerator( MSG *pMsg );
+
+	private:
+#if defined(DUILIB_USE_WEBVIEW2)
+		bool m_bUseWebView2;						// 当前是否 WebView2 模式
+		ICoreWebView2Environment* m_pWebView2Env;		// WebView2 环境
+		ICoreWebView2Controller* m_pWebView2Controller;	// WebView2 控制器
+		ICoreWebView2* m_pWebView2;					// WebView2 内核
+		UINT m_uWebView2NotifyMsg;					// 本控件实例专用的异步回调消息（避免同窗口多控件串扰）
+#endif
+		CDuiString m_sPendingUrl;					// 控件创建完成前挂起的待导航地址（IE/WebView2 通用）
+		int m_nWebView2Mode;						// -1 自动 / 0 强制 IE / 1 强制 WebView2
 	};
 } // namespace DuiLib
 #endif // __UIWEBBROWSER_H__

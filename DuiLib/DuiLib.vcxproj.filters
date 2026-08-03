@@ -400,5 +400,14 @@
     <ClInclude Include="Control\UIPageControl.h">
       <Filter>Header Files\Control</Filter>
     </ClInclude>
+    <ClInclude Include="Utils\WebView2Helper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WebView2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WebView2EnvironmentOptions.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

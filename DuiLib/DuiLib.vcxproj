@@ -69,6 +69,11 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E106ACD7-4E53-4AEE-942B-D0DD426DB34E}</ProjectGuid>
     <RootNamespace>DuiLib</RootNamespace>
+    <!-- 与各 Demo 工程保持一致；WebView2 代码需 VS2015+（v140+）工具集，老工具集（v100/VS2010）会
+         因 DUILIB_USE_WEBVIEW2 自动关闭而回退到 WebBrowser/IE 路径（见 UIWebBrowser.h） -->
+    <PlatformToolset>v100</PlatformToolset>
+    <!-- 固定现代 Windows SDK（老 SDK v7.0A 无法编译 WebView2 头文件） -->
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -1074,6 +1079,9 @@
     <ClInclude Include="Control\UIText.h" />
     <ClInclude Include="Control\UITreeView.h" />
     <ClInclude Include="Control\UIWebBrowser.h" />
+    <ClInclude Include="Utils\WebView2Helper.h" />
+    <ClInclude Include="WebView2.h" />
+    <ClInclude Include="WebView2EnvironmentOptions.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

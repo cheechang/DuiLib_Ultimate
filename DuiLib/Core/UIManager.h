@@ -560,6 +560,11 @@ namespace DuiLib {
 		bool m_bDragMode;
 		HBITMAP m_hDragBitmap;
 		IDragDropUI *m_pDragDrop;
+
+		// ´¥Ãþ
+		POINT m_ptLastTouch;
+		bool m_bTouchSupported;
+		
 		//
 		static HINSTANCE m_hInstance;
 		static HINSTANCE m_hResourceInstance;

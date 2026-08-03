@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <ExDisp.h>
 #include <ExDispid.h>
 #include <mshtmhst.h>
@@ -20,6 +20,9 @@ namespace DuiLib
 		virtual void CommandStateChange(CWebBrowserUI* pWeb, long Command,VARIANT_BOOL Enable){};
 		virtual void TitleChange(CWebBrowserUI* pWeb, BSTR bstrTitle){};
 		virtual void DocumentComplete(CWebBrowserUI* pWeb, IDispatch *pDisp,VARIANT *&url){}
+		// WebView2 模式：网页通过 window.chrome.webview.postMessage() 发来的消息（JSON 字符串）
+		// 仅在编译启用 WebView2（DUILIB_USE_WEBVIEW2）且运行于 Win10+ 时回调
+		virtual void WebMessageReceived(CWebBrowserUI* pWeb, LPCWSTR lpszMessage) {}
 
 		// interface IDocHostUIHandler
 		virtual HRESULT STDMETHODCALLTYPE ShowContextMenu(CWebBrowserUI* pWeb, 
@@ -29,9 +32,9 @@ namespace DuiLib
 			/* [in] */ IDispatch __RPC_FAR *pdispReserved)
 		{
 			//return E_NOTIMPL;
-			//���� E_NOTIMPL ��������ϵͳ�Ҽ��˵�
+			//返回 E_NOTIMPL 正常弹出系统右键菜单
 			return S_OK;
-			//����S_OK �������ϵͳ�Ҽ��˵�
+			//返回S_OK 则可屏蔽系统右键菜单
 		}
 
 		virtual HRESULT STDMETHODCALLTYPE GetHostInfo(CWebBrowserUI* pWeb, 

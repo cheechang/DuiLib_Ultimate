@@ -1,4 +1,4 @@
-// StdAfx.h : include file for standard system include files,
+﻿// StdAfx.h : include file for standard system include files,
 //  or project specific include files that are used frequently, but
 //      are changed infrequently
 //
@@ -9,7 +9,7 @@
 #pragma once
 
 #ifdef __GNUC__
-// ��ô��û�ҵ�min��max��ͷ�ļ�-_-
+// 怎么都没找到min，max的头文件-_-
 #ifndef min
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
@@ -49,10 +49,16 @@
 
 // Required for VS 2008 (fails on XP and Win2000 without this fix)
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT _WIN32_WINNT_WINXP//0x0501
+#define _WIN32_WINNT 0x0600	// Vista —— 现代 SDK 的 ATL 头文件要求 >= Vista（InitializeCriticalSectionEx）
 #endif
 
-//#define USE_XIMAGE_EFFECT //ʹ��ximage��gif�ؼ�CGifAnimExUI���أ���������,Ĭ�ϲ�ʹ��
+// 现代 Windows SDK（10.0.x）的 WRL 头文件（wrl/def.h）要求 NTDDI_VERSION >= Vista；
+// WebView2 集成（UIWebBrowser.h）经 WebView2 SDK 头文件引入 WRL，故在此统一补充定义。
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000000	// NTDDI_WIN10（WebView2 要求 Win10+）
+#endif
+
+//#define USE_XIMAGE_EFFECT //使用ximage的gif控件CGifAnimExUI开关，提升性能,默认不使用
 
 #include "UIlib.h"
 

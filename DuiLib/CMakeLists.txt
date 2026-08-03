@@ -28,3 +28,10 @@ add_custom_command(TARGET DuiLib POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
   ${CMAKE_BINARY_DIR}/bin/$<CONFIG>/DuiLib.dll ${CMAKE_BINARY_DIR}/../bin/DuiLib.dll)
 
+# 复制 WebView2 Loader（运行时需与 exe 同目录；Win10+ 且已安装 WebView2 Runtime 时生效）
+# 注意：仓库默认工具集 v100（VS2010）不编译 WebView2 代码（DUILIB_USE_WEBVIEW2 自动关闭），
+# 使用 VS2015+ 工具集构建时自动启用 WebView2 支持。
+add_custom_command(TARGET DuiLib POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  ${CMAKE_SOURCE_DIR}/3rd/WebView2/lib/x86/WebView2Loader.dll ${CMAKE_BINARY_DIR}/bin/$<CONFIG>/WebView2Loader.dll)
+
